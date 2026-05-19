@@ -1,0 +1,15 @@
+{
+"name":"Secure Chat",
+"short_name":"Chat",
+"start_url":"/",
+"display":"standalone",
+"background_color":"#ece5dd",
+"theme_color":"#075E54",
+"icons":[
+{
+"src":"https://cdn-icons-png.flaticon.com/512/733/733585.png",
+"sizes":"192x192",
+"type":"image/png"
+}
+]
+}

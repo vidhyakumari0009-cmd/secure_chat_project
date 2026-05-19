@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Secure Chat</title>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<style>
+body{
+margin:0;
+font-family:Arial;
+background:#111;
+color:white;
+height:100vh;
+display:flex;
+flex-direction:column;
+}
+
+/* ===== TOP HEADER ===== */
+#appHeader{
+background:#003442;
+color:white;
+padding:15px;
+font-size:22px;
+font-weight:bold;
+letter-spacing:1px;
+}
+
+/* MAIN LAYOUT */
+#container{
+flex:1;
+display:flex;
+height:100%;
+}
+
+/* ===== SIDEBAR ===== */
+#sidebar{
+width:28%;
+background:#0f2027;
+display:flex;
+flex-direction:column;
+border-right:1px solid #222;
+}
+
+.contactsHeader{
+padding:15px;
+font-size:18px;
+background:#003442;
+border-bottom:1px solid #222;
+}
+
+/* USERS LIST */
+#users{
+flex:1;
+overflow-y:auto;
+}
+
+.user{
+padding:14px;
+cursor:pointer;
+border-bottom:1px solid #1c2b30;
+}
+
+.user:hover{
+background:#1b3a41;
+}
+
+/* ===== CHAT AREA ===== */
+#chatArea{
+flex:1;
+display:flex;
+flex-direction:column;
+background:#0b141a;
+}
+
+/* CHAT HEADER */
+#header{
+background:#003442;
+padding:15px;
+}
+
+#typing{
+font-size:12px;
+opacity:.7;
+}
+
+/* CHAT BOX */
+#chat{
+flex:1;
+overflow-y:auto;
+padding:15px;
+}
+
+/* MESSAGES */
+.msg{
+padding:10px;
+margin:6px;
+border-radius:8px;
+max-width:70%;
+width:max-content;
+}
+
+.me{
+background:#005c4b;
+margin-left:auto;
+}
+.time{
+font-size:11px;
+opacity:0.7;
+margin-top:4px;
+text-align:right;
+}
+.other{
+background:#202c33;
+}
+
+/* INPUT AREA */
+#controls{
+display:flex;
+background:#111;
+padding:10px;
+}
+
+input{
+flex:1;
+padding:12px;
+background:#1c1c1c;
+border:none;
+color:white;
+}
+
+button{
+padding:12px;
+background:#003442;
+border:none;
+color:white;
+cursor:pointer;
+}
+</style></head>
+
+<body>
+
+<!-- TOP APP BAR -->
+<div id="appHeader">
+     Secure Chat
+</div>
+
+<div id="container">
+
+    <!-- LEFT CONTACT PANEL -->
+    <div id="sidebar">
+
+        <div class="contactsHeader">
+            <centar>Contacts</centar> 
+        </div>
+
+        <div id="users"></div>
+
+    </div>
+
+
+    <!-- CHAT AREA -->
+    <div id="chatArea">
+
+        <div id="header">
+            <div id="chatWith">Select user</div>
+            <div id="typing"></div>
+        </div>
+
+        <div id="chat"></div>
+
+        <div id="controls">
+            <input id="message" placeholder="Type message...">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+
+    </div>
+
+</div>
+<script>
+
+const socket = io();
+
+/* ================= USERNAME ================= */
+
+let username = sessionStorage.getItem("username");
+
+while(!username){
+    username = prompt("Enter username:");
+    if(username && username.trim()!=="")
+        sessionStorage.setItem("username",username.trim());
+}
+
+socket.emit("join",{username});
+
+/* ================= VARIABLES ================= */
+
+let activeUser=null;
+let sharedKey=null;
+const chat=document.getElementById("chat");
+
+/* ================= DIFFIE HELLMAN ================= */
+
+function modExp(base,exp,mod){
+let result=1;
+base%=mod;
+while(exp>0){
+if(exp%2===1) result=(result*base)%mod;
+exp=Math.floor(exp/2);
+base=(base*base)%mod;
+}
+return result;
+}
+
+const privateKey=Math.floor(Math.random()*50)+1;
+const base=5;
+const prime=23;
+
+const publicKey=modExp(base,privateKey,prime);
+
+/* save my public key */
+localStorage.setItem("public_"+username,publicKey);
+
+function computeKey(user){
+
+const otherPublic=localStorage.getItem("public_"+user);
+
+if(!otherPublic) return;
+
+sharedKey=modExp(Number(otherPublic),privateKey,prime);
+
+console.log("Shared key with",user,sharedKey);
+}
+
+/* ================= ENCRYPTION ================= */
+
+function encrypt(msg){
+return CryptoJS.AES.encrypt(msg,sharedKey.toString()).toString();
+}
+
+function decrypt(cipher){
+return CryptoJS.AES.decrypt(cipher,sharedKey.toString())
+.toString(CryptoJS.enc.Utf8);
+}
+
+/* ================= USER LIST ================= */
+
+socket.on("user_list",users=>{
+
+const div=document.getElementById("users");
+div.innerHTML="";
+
+users.forEach(u=>{
+
+if(u===username) return;
+
+const el=document.createElement("div");
+el.className="user";
+el.innerText=u;
+
+el.onclick=()=>{
+activeUser=u;
+document.getElementById("chatWith").innerText="Chat with "+u;
+computeKey(u);
+};
+
+div.appendChild(el);
+
+});
+});
+
+/* ================= SEND ================= */
+
+function sendMessage(){
+
+if(!activeUser){
+alert("Select user first");
+return;
+}
+
+if(!sharedKey){
+alert("Key not ready");
+return;
+}
+
+const input=document.getElementById("message");
+const text=input.value.trim();
+
+if(!text) return;
+
+const encrypted=encrypt(text);
+console.log("Encrypted Message:", encrypted);
+addMessage(text,true);
+
+socket.emit("send_message",{
+from:username,
+to:activeUser,
+data:encrypted
+});
+
+input.value="";
+}
+
+/* ENTER SEND */
+document.getElementById("message")
+.addEventListener("keypress",e=>{
+if(e.key==="Enter") sendMessage();
+});
+
+/* ================= RECEIVE ================= */
+
+socket.on("receive_message",data=>{
+
+computeKey(data.from);
+
+const text=decrypt(data.data);
+
+if(text)
+addMessage(text,false,data.from);
+});
+function getTime(){
+const now = new Date();
+
+let hours = now.getHours();
+let minutes = now.getMinutes();
+
+if(minutes < 10) minutes = "0"+minutes;
+
+return hours + ":" + minutes;
+}
+/* ================= DISPLAY ================= */
+
+function addMessage(text,me,user){
+
+const div=document.createElement("div");
+div.className="msg "+(me?"me":"other");
+
+const messageText=document.createElement("div");
+messageText.innerText=text;
+
+const time=document.createElement("div");
+time.className="time";
+time.innerText=getTime();
+
+div.appendChild(messageText);
+div.appendChild(time);
+
+chat.appendChild(div);
+
+/* auto scroll */
+chat.scrollTop=chat.scrollHeight;
+}
+
+/* ================= TYPING ================= */
+
+const input=document.getElementById("message");
+
+input.addEventListener("input",()=>{
+if(activeUser){
+socket.emit("typing",{from:username,to:activeUser});
+}
+});
+
+socket.on("typing",data=>{
+document.getElementById("typing").innerText=data.from+" typing...";
+setTimeout(()=>{
+document.getElementById("typing").innerText="";
+},1200);
+});
+
+</script>
+</div>
+</body>
+</html>
